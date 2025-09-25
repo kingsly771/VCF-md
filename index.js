@@ -1,14 +1,16 @@
 /**
- * whatsapp-vcf-bot
- * - Listens for messages starting with "!vcf"
- * - Example single contact command:
- *     !vcf John Doe|+237699000000|Example Org|john@example.com
- * - Example multi-contact command:
- *     !vcf MULTI
- *     Then send messages in format name|phone|org|email each line (bot will convert all lines)
+ * whatsapp-vcf-bot (Baileys v6)
+ * Commands:
+ *   !vcf Name|+Phone|Org|Email   → single contact
+ *   !vcf multi (followed by lines of contacts) → multiple contacts in one file
  */
 
-import makeWASocket, { useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } from "@adiwajshing/baileys";
+import {
+  makeWASocket,
+  useMultiFileAuthState,
+  DisconnectReason,
+  fetchLatestBaileysVersion
+} from "@adiwajshing/baileys";
 import P from "pino";
 import fs from "fs-extra";
 import path from "path";
@@ -28,7 +30,6 @@ async function start() {
     waVersion = [2, 3000, 0];
   }
 
-  // ✅ No more error at line 26
   const sock = makeWASocket({
     logger: log,
     printQRInTerminal: true,
@@ -58,55 +59,60 @@ async function start() {
 
       if (!text) return;
 
+      // ✅ VCF command
       if (text.startsWith("!vcf")) {
         const payload = text.slice(4).trim();
+
+        // Help message
         if (!payload) {
           await sock.sendMessage(sender, {
-            text: "Usage:\n!vcf Name|+Phone|Org|email\nOr send multiple contacts separated by newlines."
+            text:
+              "Usage:\n" +
+              "👉 !vcf Name|+Phone|Org|Email (single contact)\n\n" +
+              "👉 !vcf multi\nPaste multiple lines like:\n" +
+              "John Doe|+237699000000|Company|john@example.com\n" +
+              "Jane Roe|+237699111111|Org2|jane@org.com"
           });
           return;
         }
 
+        // Multi-contact mode
+        if (payload.toLowerCase().startsWith("multi")) {
+          const lines = payload.split(/\r?\n/).slice(1).map(l => l.trim()).filter(Boolean);
+          if (lines.length === 0) {
+            await sock.sendMessage(sender, { text: "❌ No contacts found. Paste lines after '!vcf multi'." });
+            return;
+          }
+          const contacts = lines.map(parseContactLine).filter(Boolean);
+          if (contacts.length === 0) {
+            await sock.sendMessage(sender, { text: "❌ Couldn't parse contacts. Format: Name|+Phone|Org|Email" });
+            return;
+          }
+          const vcfText = buildVCardMulti(contacts);
+          await sendVcfFile(sock, sender, vcfText, `phonebook-${Date.now()}.vcf`, contacts.length);
+          return;
+        }
+
+        // Single-contact mode
         const lines = payload.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-        const contacts = lines.map(line => parseContactLine(line)).filter(Boolean);
+        const contacts = lines.map(parseContactLine).filter(Boolean);
 
         if (contacts.length === 0) {
-          await sock.sendMessage(sender, { text: "❌ Couldn't parse contact. Use format: Name|+Phone|Org|email" });
+          await sock.sendMessage(sender, { text: "❌ Couldn't parse contact. Format: Name|+Phone|Org|Email" });
           return;
         }
 
         const vcfText = buildVCardMulti(contacts);
-        const tmpDir = path.join(process.cwd(), "tmp");
-        await fs.ensureDir(tmpDir);
-        const filePath = path.join(tmpDir, `contacts-${Date.now()}.vcf`);
-        await fs.writeFile(filePath, vcfText, "utf8");
-
-        await sock.sendMessage(sender, {
-          document: fs.createReadStream(filePath),
-          fileName: "contacts.vcf",
-          mimetype: "text/vcard",
-          caption: `📇 VCF with ${contacts.length} contact(s)`
-        });
-
-        setTimeout(() => fs.remove(filePath).catch(() => {}), 60_000);
+        await sendVcfFile(sock, sender, vcfText, `contact-${Date.now()}.vcf`, contacts.length);
       }
 
+      // ✅ Convert contactMessage into .vcf
       if (msg.message?.contactMessage) {
         const contact = msg.message.contactMessage;
         const phone = contact.vcard ? extractPhoneFromVcard(contact.vcard) : (contact.jid || "").split("@")[0];
         const name = contact.displayName || contact.vcard?.match(/FN:(.*)/)?.[1] || "contact";
         const vcfText = buildVCardSingle({ name, phone, org: "", email: "" });
-        const tmpDir = path.join(process.cwd(), "tmp");
-        await fs.ensureDir(tmpDir);
-        const filePath = path.join(tmpDir, `contact-${Date.now()}.vcf`);
-        await fs.writeFile(filePath, vcfText, "utf8");
-        await sock.sendMessage(sender, {
-          document: fs.createReadStream(filePath),
-          fileName: `${name.replace(/\s+/g, "_")}.vcf`,
-          mimetype: "text/vcard",
-          caption: `📇 Here's the VCF for ${name}`
-        });
-        setTimeout(() => fs.remove(filePath).catch(() => {}), 60_000);
+        await sendVcfFile(sock, sender, vcfText, `${name.replace(/\s+/g, "_")}.vcf`, 1);
       }
 
     } catch (err) {
@@ -115,6 +121,7 @@ async function start() {
   });
 }
 
+// --- Helpers ---
 function parseContactLine(line) {
   const parts = line.split("|").map(p => p.trim());
   if (parts.length < 2) return null;
@@ -153,6 +160,22 @@ function buildVCardMulti(contacts) {
 function extractPhoneFromVcard(vcardText) {
   const m = vcardText.match(/TEL[^:]*:(\+?\d+)/i);
   return m ? m[1] : "";
+}
+
+async function sendVcfFile(sock, jid, vcfText, fileName, count) {
+  const tmpDir = path.join(process.cwd(), "tmp");
+  await fs.ensureDir(tmpDir);
+  const filePath = path.join(tmpDir, fileName);
+  await fs.writeFile(filePath, vcfText, "utf8");
+
+  await sock.sendMessage(jid, {
+    document: fs.createReadStream(filePath),
+    fileName,
+    mimetype: "text/vcard",
+    caption: `📇 VCF with ${count} contact(s)`
+  });
+
+  setTimeout(() => fs.remove(filePath).catch(() => {}), 60_000);
 }
 
 start().catch(err => {
