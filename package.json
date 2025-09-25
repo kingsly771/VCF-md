@@ -1,0 +1,14 @@
+{
+  "name": "whatsapp-vcf-bot",
+  "version": "1.0.0",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@adiwajshing/baileys": "^5.0.0",
+    "pino": "^8.0.0",
+    "fs-extra": "^11.0.0"
+  }
+}
