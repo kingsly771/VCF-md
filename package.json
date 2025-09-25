@@ -7,8 +7,8 @@
     "start": "node index.js"
   },
   "dependencies": {
-    "@adiwajshing/baileys": "^5.0.0",
-    "pino": "^8.0.0",
-    "fs-extra": "^11.0.0"
+    "@adiwajshing/baileys": "^6.7.9",
+    "pino": "^9.0.0",
+    "fs-extra": "^11.2.0"
   }
 }
